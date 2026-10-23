@@ -1,0 +1,164 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[margin=2.2cm]{geometry}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{enumitem}
+\usepackage{graphicx}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage[hidelinks]{hyperref}
+\usepackage{parskip}
+
+\definecolor{codebg}{RGB}{245,246,248}
+\definecolor{codekw}{RGB}{30,80,160}
+\definecolor{rulegray}{RGB}{200,200,200}
+
+\lstset{
+  basicstyle=\ttfamily\footnotesize,
+  backgroundcolor=\color{codebg},
+  breaklines=true,
+  breakatwhitespace=false,
+  columns=fullflexible,
+  keepspaces=true,
+  frame=single,
+  rulecolor=\color{rulegray},
+  framesep=4pt,
+  xleftmargin=4pt,
+  showstringspaces=false,
+  literate={->}{{$\rightarrow$}}2 {→}{{$\rightarrow$}}1 {✓}{{\checkmark}}1
+}
+
+\titleformat{\section}{\Large\bfseries\color{codekw}}{\thesection.}{0.6em}{}
+\titleformat{\subsection}{\large\bfseries}{\thesubsection}{0.6em}{}
+
+\pagestyle{fancy}\fancyhf{}
+\lhead{CS6008 --- Assignment 2: DNS Security}
+\rhead{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+% ---- fill in your details ----
+\newcommand{\authorname}{Bathula Rithvik \quad (Roll No. 23B0939)}
+
+\begin{document}
+
+\begin{titlepage}
+\centering
+\vspace*{3cm}
+{\Huge\bfseries DNS Security\par}
+\vspace{0.4cm}
+{\Large Assignment 2 --- Build, Attack, and Defend a DNS Hierarchy\par}
+\vspace{1.5cm}
+{\large CS6008: Network Security \\ Department of Computer Science \& Engineering, IIT Bombay\par}
+\vspace{2cm}
+{\large \authorname\par}
+\vfill
+{\large \today\par}
+\end{titlepage}
+
+\tableofcontents
+\newpage
+
+\section*{Overview}
+\addcontentsline{toc}{section}{Overview}
+This report documents a seven-phase study of DNS security carried out in a self-contained
+Docker lab. We first stand up a plain hierarchical DNS service across three isolated subnets,
+then mount an on-path forgery attack, add a DNSSEC chain of trust and re-run the attack, attempt
+a signature-stripping downgrade, walk a signed zone, move the adversary to the client's last mile,
+and finally encrypt that last mile with DoT. Each phase reports design choices, verification and
+attack evidence (terminal output and annotated packet captures), and answers to the phase's
+questions --- not only \emph{what} happened, but \emph{why}.
+
+All nodes run on isolated Docker bridge networks; nothing touches the real Internet. Every attack
+program is written in C/C++ with \texttt{libpcap}; \texttt{dig}, \texttt{delv}, \texttt{tshark},
+and \texttt{curl} are used only to verify results. BIND 9.20.30 runs on every nameserver and on
+the resolver.
+
+% =====================================================================
+\section{Phase 1 --- Building the DNS Hierarchy}
+
+\subsection{Design}
+The lab uses three Docker bridges --- client \texttt{172.16.1.0/24}, resolver
+\texttt{172.16.2.0/24}, and authoritative \texttt{172.16.3.0/24} --- with IP masquerade disabled
+on each. Docker's built-in inter-bridge isolation then drops any packet that tries to cross
+directly between subnets, so the \emph{only} path between two subnets is a router container that
+has an interface in both. The two routers (\texttt{edge-router}, \texttt{core-router}) enable
+\texttt{net.ipv4.ip\_forward=1} with no NAT; every other node installs static \texttt{/24} routes
+pointing at the router on its segment. Because a \texttt{/24} route is more specific than Docker's
+default route via the bridge gateway, cross-subnet traffic is forced onto our routers.
+
+The hierarchy is a faithful miniature of the real DNS: \texttt{root-ns} is authoritative for the
+root and delegates \texttt{com} to \texttt{tld-ns} (glue \texttt{ns.com A 172.16.3.20});
+\texttt{tld-ns} delegates \texttt{example.com} to \texttt{domain-ns} (glue
+\texttt{ns.example.com A 172.16.3.30}); \texttt{domain-ns} serves \texttt{A} records for
+\texttt{example.com} and \texttt{www.example.com} pointing at the webserver
+(\texttt{172.16.1.20}). The resolver is recursive with \texttt{dnssec-validation no} and uses a
+root-hints file that names only our private \texttt{root-ns}.
+
+\subsection{Verification}
+\textbf{Resolution and fetch.} From the client, \texttt{dig} returns the webserver address and
+\texttt{curl} returns the legitimate page (full log: \texttt{phase1/evidence/p1\_resolve\_fetch.txt}):
+
+\begin{lstlisting}
+$ docker exec client dig +short example.com
+172.16.1.20
+$ docker exec client dig +short www.example.com
+172.16.1.20
+$ docker exec client curl -s http://example.com | grep -i legitimate
+   <p>This is the <strong>legitimate</strong> site, served by webserver at 172.16.1.20.</p>
+\end{lstlisting}
+
+\textbf{Isolation.} A query sent straight to the authoritative subnet gets no answer, because the
+client has no route into \texttt{172.16.3.0/24} --- it falls back to Docker's default gateway,
+which does not forward between the isolated bridges:
+
+\begin{lstlisting}
+$ docker exec client dig +time=3 +tries=1 @172.16.3.10 example.com
+;; communications error ... no servers could be reached
+\end{lstlisting}
+
+\subsection{Report answers}
+
+\textbf{(a) Root $\rightarrow$ TLD $\rightarrow$ Domain referral --- what is visible on the wire.}
+Captured on \texttt{core-router} (resolver-subnet interface) during one cold-cache resolution
+(\texttt{phase1/evidence/p1\_referral.pcap}, decoded below):
+
+\begin{lstlisting}
+1  172.16.2.10 -> 172.16.3.10  query  A example.com
+3  172.16.3.10 -> 172.16.2.10  resp   referral: com NS ns.com, glue A 172.16.3.20
+4  172.16.2.10 -> 172.16.3.20  query  A example.com
+6  172.16.3.20 -> 172.16.2.10  resp   referral: example.com NS ns.example.com, glue A 172.16.3.30
+7  172.16.2.10 -> 172.16.3.30  query  A example.com
+8  172.16.3.30 -> 172.16.2.10  resp   ANSWER: example.com A 172.16.1.20
+\end{lstlisting}
+
+Every message is plain, unauthenticated UDP/53. On the wire an observer sees, in cleartext: the
+full query name (\texttt{example.com}) at every tier, the 16-bit DNS transaction ID and UDP
+source port that tie a reply to its query, the referral NS names and their glue addresses, and
+finally the answer \texttt{A 172.16.1.20}. Nothing is signed or encrypted; there is no field that
+binds a reply to the genuine server beyond the ID/port pair, both of which are visible to anyone
+on the path.
+
+\textbf{(b) How the resolver's query reaches \texttt{root-ns}.} The resolver has no interface on
+the authoritative subnet, so it uses the installed static route:
+
+\begin{lstlisting}
+$ docker exec resolver ip route get 172.16.3.10
+172.16.3.10 via 172.16.2.3 dev eth0 src 172.16.2.10
+\end{lstlisting}
+
+The next hop \texttt{172.16.2.3} is \texttt{core-router}, which has a foot in both the resolver
+and authoritative subnets and forwards the packet (\texttt{ip\_forward=1}, no NAT) out onto
+\texttt{172.16.3.0/24} to \texttt{root-ns}. The reply returns by the symmetric path. This is why
+the capture on \texttt{core-router} sees the entire referral chain.
+
+\textbf{(c) What a node on the resolver's path could do.} Because the whole exchange is cleartext
+and unauthenticated, any node that can see and relay the resolver's traffic --- exactly the
+position \texttt{core-router} occupies, and the position the attacker will be given in Phase 2 ---
+can read every query and, crucially, \emph{forge a reply}: it knows the transaction ID, the
+source port, and the question, so it can craft a response that the resolver will accept as
+genuine and cache. It can do this for one chosen name while relaying everything else untouched.
+We exploit precisely this in Phase 2.
+
+\end{document}

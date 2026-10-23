@@ -1,0 +1,61 @@
+### client /etc/resolv.conf
+nameserver 172.16.2.10
+options ndots:1
+
+### dig example.com
+
+; <<>> DiG 9.20.30-1~deb13u1-Debian <<>> example.com
+;; global options: +cmd
+;; Got answer:
+;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 20512
+;; flags: qr rd ra; QUERY: 1, ANSWER: 1, AUTHORITY: 0, ADDITIONAL: 1
+
+;; OPT PSEUDOSECTION:
+; EDNS: version: 0, flags:; udp: 1232
+; COOKIE: 15a879ac8b93dbab010000006adb0f43225f47561f88cb67 (good)
+;; QUESTION SECTION:
+;example.com.			IN	A
+
+;; ANSWER SECTION:
+example.com.		3600	IN	A	172.16.1.20
+
+;; Query time: 3 msec
+;; SERVER: 172.16.2.10#53(172.16.2.10) (UDP)
+;; WHEN: Fri Oct 23 07:39:47 UTC 2026
+;; MSG SIZE  rcvd: 84
+
+
+### dig www.example.com
+
+; <<>> DiG 9.20.30-1~deb13u1-Debian <<>> www.example.com
+;; global options: +cmd
+;; Got answer:
+;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 11974
+;; flags: qr rd ra; QUERY: 1, ANSWER: 1, AUTHORITY: 0, ADDITIONAL: 1
+
+;; OPT PSEUDOSECTION:
+; EDNS: version: 0, flags:; udp: 1232
+; COOKIE: 3dfd0039cb7cdf66010000006adb0f43392a84d92ebdef37 (good)
+;; QUESTION SECTION:
+;www.example.com.		IN	A
+
+;; ANSWER SECTION:
+www.example.com.	3600	IN	A	172.16.1.20
+
+;; Query time: 2 msec
+;; SERVER: 172.16.2.10#53(172.16.2.10) (UDP)
+;; WHEN: Fri Oct 23 07:39:47 UTC 2026
+;; MSG SIZE  rcvd: 88
+
+
+### curl http://example.com
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>example.com</title></head>
+<body style="font-family:sans-serif;max-width:40em;margin:3em auto">
+  <h1>Welcome to example.com</h1>
+  <p>This is the <strong>legitimate</strong> site, served by
+     <code>webserver</code> at <code>172.16.1.20</code>.</p>
+  <p>CS6008 Network Security — Assignment 2 DNS lab.</p>
+</body>
+</html>

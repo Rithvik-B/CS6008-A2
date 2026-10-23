@@ -1,0 +1,22 @@
+### Phase 1 referral chain, captured on core-router eth1 (resolver subnet side)
+### Columns: src  dst  is_response  qname  answer_A  ns
+### Shows iterative resolution: resolver -> root(.) -> com -> example.com
+
+172.16.2.10	172.16.3.10	False	example.com		
+172.16.2.10	172.16.3.10	False	<Root>		
+172.16.3.10	172.16.2.10	True	example.com	172.16.3.20	ns.com
+172.16.2.10	172.16.3.20	False	example.com		
+172.16.3.10	172.16.2.10	True	<Root>		root-ns
+172.16.3.20	172.16.2.10	True	example.com	172.16.3.30	ns.example.com
+172.16.2.10	172.16.3.30	False	example.com		
+172.16.3.30	172.16.2.10	True	example.com	172.16.1.20,172.16.3.30	ns.example.com
+
+### tshark info-column summary
+    1   0.000000  172.16.2.10 → 172.16.3.10  DNS 94 Standard query 0x0a6c A example.com OPT
+    2   0.000151  172.16.2.10 → 172.16.3.10  DNS 82 Standard query 0x1c53 NS <Root> OPT
+    3   0.000423  172.16.3.10 → 172.16.2.10  DNS 143 Standard query response 0x0a6c A example.com NS ns.com A 172.16.3.20 OPT
+    4   0.000656  172.16.2.10 → 172.16.3.20  DNS 94 Standard query 0x6162 A example.com OPT
+    5   0.000661  172.16.3.10 → 172.16.2.10  DNS 118 Standard query response 0x1c53 NS <Root> NS root-ns OPT
+    6   0.000899  172.16.3.20 → 172.16.2.10  DNS 143 Standard query response 0x6162 A example.com NS ns.example.com A 172.16.3.30 OPT
+    7   0.001071  172.16.2.10 → 172.16.3.30  DNS 94 Standard query 0xbc08 A example.com OPT
+    8   0.001222  172.16.3.30 → 172.16.2.10  DNS 159 Standard query response 0xbc08 A example.com A 172.16.1.20 NS ns.example.com A 172.16.3.30 OPT

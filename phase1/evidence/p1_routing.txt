@@ -1,0 +1,19 @@
+### client ip route
+default via 172.16.1.1 dev eth0 
+172.16.1.0/24 dev eth0 proto kernel scope link src 172.16.1.10 
+172.16.2.0/24 via 172.16.1.2 dev eth0 
+
+### resolver ip route
+default via 172.16.2.1 dev eth0 
+172.16.1.0/24 via 172.16.2.2 dev eth0 
+172.16.2.0/24 dev eth0 proto kernel scope link src 172.16.2.10 
+172.16.3.0/24 via 172.16.2.3 dev eth0 
+
+### resolver -> root-ns path (via core-router 172.16.2.3)
+172.16.3.10 via 172.16.2.3 dev eth0 src 172.16.2.10 uid 0 
+    cache 
+
+### core-router forwarding + interfaces
+1
+eth0@if109       UP             172.16.3.3/24 
+eth1@if115       UP             172.16.2.3/24 
