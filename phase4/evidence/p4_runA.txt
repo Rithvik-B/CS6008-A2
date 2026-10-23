@@ -1,0 +1,15 @@
+### Phase 4 RUN A -- strip+forge against the FULLY SIGNED chain (example.com DS present)
+### The attacker strips example.com RRSIG/DNSKEY AND the DS from the com referral, and
+### forges the A -- but the downgrade FAILS.
+
+$ docker exec client dig example.com
+;; ->>HEADER<<- opcode: QUERY, status: SERVFAIL, id: 44823
+$ docker exec client dig +short example.com   -> (empty: SERVFAIL, client gets nothing)
+
+### interceptor strip actions:
+      3 [STRIPPED example.com DNSSEC RRs (DS/RRSIG/DNSKEY)]
+      2 [STRIPPED example.com sigs + FORGED A]
+
+### resolver named log -- WHY it refuses (cannot authenticate the absence of signatures):
+23-Oct-2026 08:42:18.591 broken trust chain resolving 'example.com/A/IN': 172.16.3.30#53
+23-Oct-2026 08:42:21.087 broken trust chain resolving 'example.com/A/IN': 172.16.3.30#53
