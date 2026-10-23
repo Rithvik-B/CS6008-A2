@@ -1,0 +1,194 @@
+# Phase 5 — zone walking (NSEC leaks names; NSEC3 is the fix).
+# Zones are SIGNED and the resolver VALIDATES against the root KSK. Attacker + binary
+# are unchanged from Phase 2. Run sign/sign-all.sh BEFORE `docker compose up`.
+# Build the shared base image first:  docker build -t cs6008-dnslab:base ../common
+# Then:  docker compose up -d
+#
+# Isolation model: three bridges with IP-masquerade DISABLED. Docker's own
+# isolation drops traffic directly between bridges, so the ONLY path between
+# subnets is through a router container that has a foot in both. Routers forward
+# (ip_forward=1, no NAT); every other node installs static /24 routes via the
+# router on its segment (more specific than Docker's default route).
+
+networks:
+  client_net:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.enable_ip_masquerade: "false"
+    ipam:
+      config:
+        - subnet: 172.16.1.0/24
+  resolver_net:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.enable_ip_masquerade: "false"
+    ipam:
+      config:
+        - subnet: 172.16.2.0/24
+  auth_net:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.enable_ip_masquerade: "false"
+    ipam:
+      config:
+        - subnet: 172.16.3.0/24
+
+services:
+  # ---------------- client subnet (172.16.1.0/24) ----------------
+  client:
+    image: cs6008-dnslab:base
+    container_name: client
+    hostname: client
+    sysctls:
+      net.ipv4.ip_forward: "0"   # policy: only routers forward
+    cap_add: [NET_ADMIN]
+    environment:
+      STATIC_ROUTES: "172.16.2.0/24:172.16.1.2"
+    # point the stub resolver at our recursive resolver, then idle
+    command: ["sh","-c","printf 'nameserver 172.16.2.10\noptions ndots:1\n' > /etc/resolv.conf 2>/dev/null || true; exec sleep infinity"]
+    networks:
+      client_net:
+        ipv4_address: 172.16.1.10
+
+  webserver:
+    image: cs6008-dnslab:base
+    container_name: webserver
+    hostname: webserver
+    sysctls:
+      net.ipv4.ip_forward: "0"   # policy: only routers forward
+    volumes:
+      - ./www:/srv/www:ro
+    command: ["python3","-m","http.server","80","--directory","/srv/www"]
+    networks:
+      client_net:
+        ipv4_address: 172.16.1.20
+
+  # adversary's webserver with the defacement page
+  rogue-web:
+    image: cs6008-dnslab:base
+    container_name: rogue-web
+    hostname: rogue-web
+    sysctls:
+      net.ipv4.ip_forward: "0"   # policy: only routers forward
+    volumes:
+      - ./rogue-www:/srv/www:ro
+    command: ["python3","-m","http.server","80","--directory","/srv/www"]
+    networks:
+      client_net:
+        ipv4_address: 172.16.1.30
+
+  # ---------------- resolver subnet (172.16.2.0/24) ----------------
+  resolver:
+    image: cs6008-dnslab:base
+    container_name: resolver
+    hostname: resolver
+    sysctls:
+      net.ipv4.ip_forward: "0"   # policy: only routers forward
+    cap_add: [NET_ADMIN]
+    environment:
+      STATIC_ROUTES: "172.16.3.0/24:172.16.2.3 172.16.1.0/24:172.16.2.2"
+    volumes:
+      - ./config/resolver:/etc/bind:ro
+    command: ["named","-c","/etc/bind/named.conf","-g"]
+    networks:
+      resolver_net:
+        ipv4_address: 172.16.2.10
+
+  # ---------------- authoritative subnet (172.16.3.0/24) ----------------
+  root-ns:
+    image: cs6008-dnslab:base
+    container_name: root-ns
+    hostname: root-ns
+    sysctls:
+      net.ipv4.ip_forward: "0"   # policy: only routers forward
+    cap_add: [NET_ADMIN]
+    environment:
+      STATIC_ROUTES: "172.16.2.0/24:172.16.3.3"
+    volumes:
+      - ./config/root-ns:/etc/bind:ro
+    command: ["named","-c","/etc/bind/named.conf","-g"]
+    networks:
+      auth_net:
+        ipv4_address: 172.16.3.10
+
+  tld-ns:
+    image: cs6008-dnslab:base
+    container_name: tld-ns
+    hostname: tld-ns
+    sysctls:
+      net.ipv4.ip_forward: "0"   # policy: only routers forward
+    cap_add: [NET_ADMIN]
+    environment:
+      STATIC_ROUTES: "172.16.2.0/24:172.16.3.3"
+    volumes:
+      - ./config/tld-ns:/etc/bind:ro
+    command: ["named","-c","/etc/bind/named.conf","-g"]
+    networks:
+      auth_net:
+        ipv4_address: 172.16.3.20
+
+  domain-ns:
+    image: cs6008-dnslab:base
+    container_name: domain-ns
+    hostname: domain-ns
+    sysctls:
+      net.ipv4.ip_forward: "0"   # policy: only routers forward
+    cap_add: [NET_ADMIN]
+    environment:
+      STATIC_ROUTES: "172.16.2.0/24:172.16.3.3"
+    volumes:
+      - ./config/domain-ns:/etc/bind:ro
+    command: ["named","-c","/etc/bind/named.conf","-g"]
+    networks:
+      auth_net:
+        ipv4_address: 172.16.3.30
+
+  # ---------------- routers (two interfaces each, forward only) ----------------
+  edge-router:
+    image: cs6008-dnslab:base
+    container_name: edge-router
+    hostname: edge-router
+    cap_add: [NET_ADMIN]
+    environment:
+      ENABLE_FORWARDING: "1"
+    sysctls:
+      net.ipv4.ip_forward: "1"
+    command: ["sleep","infinity"]
+    networks:
+      client_net:
+        ipv4_address: 172.16.1.2
+      resolver_net:
+        ipv4_address: 172.16.2.2
+
+  core-router:
+    image: cs6008-dnslab:base
+    container_name: core-router
+    hostname: core-router
+    cap_add: [NET_ADMIN]
+    environment:
+      ENABLE_FORWARDING: "1"
+    sysctls:
+      net.ipv4.ip_forward: "1"
+    volumes:
+      - ./diversion:/diversion:ro
+    command: ["sleep","infinity"]
+    networks:
+      resolver_net:
+        ipv4_address: 172.16.2.3
+      auth_net:
+        ipv4_address: 172.16.3.3
+
+  # on-path adversary on the resolver subnet; NET_RAW for libpcap capture+inject.
+  attacker:
+    image: cs6008-dnslab:base
+    container_name: attacker
+    hostname: attacker
+    sysctls:
+      net.ipv4.ip_forward: "0"   # policy: only routers forward
+    cap_add: [NET_ADMIN, NET_RAW]
+    volumes:
+      - ./attack:/attack
+    command: ["sleep","infinity"]
+    networks:
+      resolver_net:
+        ipv4_address: 172.16.2.100

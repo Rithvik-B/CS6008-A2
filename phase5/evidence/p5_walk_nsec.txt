@@ -1,0 +1,26 @@
+### Phase 5.3 ATTACK -- NSEC zone walk (C/libpcap), from knowledge of example.com alone
+### no AXFR, no wordlist -- just follow the signed NSEC chain.
+
+NSEC zone-walk of 'example.com' via resolver 172.16.2.10 (libpcap craft+capture, no AXFR/wordlist)
+
+  query 1   NSEC example.com              ->  backup.example.com
+  query 2   NSEC backup.example.com       ->  dev.example.com
+  query 3   NSEC dev.example.com          ->  git.example.com
+  query 4   NSEC git.example.com          ->  mail.example.com
+  query 5   NSEC mail.example.com         ->  monitoring.example.com
+  query 6   NSEC monitoring.example.com   ->  ns.example.com
+  query 7   NSEC ns.example.com           ->  vpn.example.com
+  query 8   NSEC vpn.example.com          ->  www.example.com
+  query 9   NSEC www.example.com          ->  example.com
+  (next wrapped to apex -- walk complete)
+
+Recovered 8 name(s) in 9 queries:
+  example.com	(apex)
+  backup.example.com
+  dev.example.com
+  git.example.com
+  mail.example.com
+  monitoring.example.com
+  ns.example.com
+  vpn.example.com
+  www.example.com

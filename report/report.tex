@@ -398,4 +398,77 @@ protection is the one in Run B: \textbf{signing the child but never publishing i
 The zone looks protected (it has keys and RRSIGs) but is globally treated as unsigned, so the plain
 Phase-2 forgery works again. Signing a zone is only half the job; the DS must reach the parent.
 
+
+% =====================================================================
+\section{Phase 5 --- Zone Walking}
+
+\subsection{Design}
+The Phase 3 signed, validating deployment is reused. \texttt{example.com} is populated with six
+hidden internal-service names --- \texttt{dev, git, mail, vpn, backup, monitoring} --- that are not
+advertised anywhere, alongside the public apex and \texttt{www}. The zone is signed with
+\textbf{NSEC} (the \texttt{dnssec-signzone} default), and the fix re-signs it with \textbf{NSEC3}.
+The walker (\texttt{attack/zonewalk.c}) crafts every query and reads every reply with libpcap --- no
+resolver library, no AXFR, no wordlist --- sending to the recursive resolver, which fetches and
+returns the signed denials.
+
+\subsection{Verification (5.2)}
+A query for a name that does not exist is answered with a signed NSEC that, to prove the gap, names
+the \emph{existing} records on either side (\texttt{phase5/evidence/p5\_verify.txt}):
+\begin{lstlisting}
+$ dig +dnssec nonexistent.example.com      ->  status: NXDOMAIN
+example.com. 3600 IN NSEC backup.example.com. A NS SOA RRSIG NSEC DNSKEY
+\end{lstlisting}
+The denial for \texttt{nonexistent} already leaks that \texttt{backup.example.com} exists.
+
+\subsection{Report answers}
+
+\textbf{(a) The names recovered, and the exact queries that produced them.} Starting from
+\texttt{example.com} alone, the walker follows the NSEC chain, learning one new name per step
+(\texttt{phase5/evidence/p5\_walk\_nsec.txt}):
+\begin{lstlisting}
+query 1  NSEC example.com            -> backup.example.com
+query 2  NSEC backup.example.com     -> dev.example.com
+query 3  NSEC dev.example.com        -> git.example.com
+query 4  NSEC git.example.com        -> mail.example.com
+query 5  NSEC mail.example.com       -> monitoring.example.com
+query 6  NSEC monitoring.example.com -> ns.example.com
+query 7  NSEC ns.example.com         -> vpn.example.com
+query 8  NSEC vpn.example.com        -> www.example.com
+query 9  NSEC www.example.com        -> example.com     (wraps to apex: done)
+
+Recovered 8 names in 9 queries: backup, dev, git, mail, monitoring, ns, vpn, www
+\end{lstlisting}
+Each step queries the immediate canonical successor of the current name (a nonexistent
+\texttt{\textbackslash000.}name, with the EDNS DO bit set) so the authoritative \texttt{example.com}
+NSEC covering that gap is returned; its \emph{next} field is the next existing name. Nine queries
+recover all eight names --- within the ``number of names $+2$'' budget. All six hidden services are
+exposed.
+
+\textbf{(b) Which configuration made the walk possible, and why signed denial leaks what plain DNS
+does not.} NSEC made it possible. A signed proof of non-existence must be computed \emph{before} the
+query is known (it is signed offline), so it cannot be about the queried name itself --- instead each
+NSEC asserts ``nothing exists between name X and name Y,'' naming two real adjacent names. Chaining
+those intervals is exactly a sorted listing of the zone. Plain (unsigned) DNS leaks nothing
+comparable: it answers a nonexistent name with a bare NXDOMAIN and no information about neighbours,
+because it has no need to prove anything. DNSSEC's requirement to \emph{prove} non-existence, offline
+and in advance, is precisely what forces it to reveal the surrounding names.
+
+\textbf{(c) What the fix costs, and what an enumerator can still learn.} Re-signing with NSEC3
+closes the online walk: the same tool now recovers \emph{zero} names, while a nonexistent name still
+gets an authenticated NXDOMAIN --- proven by an NSEC3 record whose owner is a \emph{hash} of the name
+(salt \texttt{DEADBEEF}), with no readable successor to follow
+(\texttt{phase5/evidence/p5\_walk\_nsec3\_fails.txt}):
+\begin{lstlisting}
+nonexistent.example.com ->  NXDOMAIN, proven by  <hash>.example.com NSEC3 1 0 0 DEADBEEF <hash> ...
+zonewalk ->  Recovered 0 names
+\end{lstlisting}
+The cost to the operator is real: NSEC3 hashing (and optionally many iterations) makes signing and
+denial responses more expensive, and it adds the NSEC3PARAM/salt machinery. And it is not a complete
+cure: NSEC3 publishes the \emph{hashes} of every name, so an enumerator can still harvest the full
+set of hashes by walking the NSEC3 chain and then mount an \emph{offline} dictionary/brute-force
+attack against them (tools such as \texttt{nsec3walker}/\texttt{hashcat}). NSEC3 raises the cost of
+enumeration from a handful of online queries to an offline cracking effort; it does not make the
+names secret. Only not signing (or using aggressive-NSEC/online-signing designs) changes that
+trade-off further.
+
 \end{document}

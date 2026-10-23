@@ -1,0 +1,8 @@
+### Phase 5.2 VERIFY -- authenticated denial of existence (NSEC) for a nonexistent name
+### The signed NSEC proving "nonexistent.example.com does not exist" names the EXISTING
+### neighbours on either side of the gap -- that is the leak.
+
+$ dig +dnssec nonexistent.example.com
+;; ->>HEADER<<- opcode: QUERY, status: NXDOMAIN, id: 19505
+example.com.		3600	IN	NSEC	backup.example.com. A NS SOA RRSIG NSEC DNSKEY
+monitoring.example.com.	3600	IN	NSEC	ns.example.com. A RRSIG NSEC

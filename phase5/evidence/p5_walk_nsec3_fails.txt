@@ -1,0 +1,14 @@
+### Phase 5.3b FIX -- re-sign example.com with NSEC3; the SAME walk now recovers NOTHING
+### while a nonexistent name still gets an authenticated denial (hashed NSEC3).
+
+# nonexistent name -> still NXDOMAIN, proven by a HASHED NSEC3 (owner is a hash, salt DEADBEEF):
+;; ->>HEADER<<- opcode: QUERY, status: NXDOMAIN, id: 1704
+<hash>.example.com. 3587 IN RRSIG NSEC3 13 3 3600 20261122075759 20261023075759 52737 example.com. <hash> <hash>==
+
+# the walk against NSEC3:
+NSEC zone-walk of 'example.com' via resolver 172.16.2.10 (libpcap craft+capture, no AXFR/wordlist)
+
+  (no NSEC for example.com -- stopping)
+
+Recovered 0 name(s) in 0 queries:
+  example.com	(apex)
