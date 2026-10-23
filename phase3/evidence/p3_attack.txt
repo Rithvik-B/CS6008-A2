@@ -1,0 +1,17 @@
+### Phase 3.3 ATTACK -- Phase 2 forge re-run UNCHANGED against the validating resolver
+
+$ docker exec client dig example.com
+;; ->>HEADER<<- opcode: QUERY, status: SERVFAIL, id: 64911
+;; flags: qr rd ra; QUERY: 1, ANSWER: 0, AUTHORITY: 0, ADDITIONAL: 1
+
+$ docker exec client dig +short example.com   (what the user sees)
+(empty = SERVFAIL, no answer)
+
+### the interceptor IS still forging (binary unchanged from Phase 2):
+[forge] relayed 438-byte DNS reply -> resolver  *** example.com A REWRITTEN -> rogue-web *** (seen=12 forged=2)
+
+### WHY the resolver rejects it (resolver named log):
+23-Oct-2026 08:26:41.547 validating example.com/A: no valid signature found
+23-Oct-2026 08:26:41.547 RRSIG failed to verify resolving 'example.com/A/IN': 172.16.3.30#53
+23-Oct-2026 08:26:43.937 validating example.com/A: no valid signature found
+23-Oct-2026 08:26:43.937 RRSIG failed to verify resolving 'example.com/A/IN': 172.16.3.30#53

@@ -1,0 +1,22 @@
+### Phase 3.2 VERIFY -- healthy signed hierarchy (no interceptor in path)
+
+### (a) dig +dnssec example.com : note the "ad" (authenticated data) flag and the RRSIG
+;; flags: qr rd ra ad; QUERY: 1, ANSWER: 2, AUTHORITY: 0, ADDITIONAL: 1
+; EDNS: version: 0, flags: do; udp: 1232
+;; ANSWER SECTION:
+example.com.		3600	IN	A	172.16.1.20
+example.com.		3600	IN	RRSIG	A 13 2 3600 20261122072435 20261023072435 19890 example.com. TVZej6fdLbzpCN6C+dx/MNSmf0NCtay1xkNJ181+MDpceOcd6rENsMmK cYi8Oe7RTX0HKigLrSbkq3UXRfzAEw==
+
+### (b) delv validates the FULL chain against our root KSK trust anchor
+; fully validated
+example.com.		3600	IN	A	172.16.1.20
+example.com.		3600	IN	RRSIG	A 13 2 3600 20261122072435 20261023072435 19890 example.com. TVZej6fdLbzpCN6C+dx/MNSmf0NCtay1xkNJ181+MDpceOcd6rENsMmK cYi8Oe7RTX0HKigLrSbkq3UXRfzAEw==
+
+### (c) the delegation chain: DNSKEY at each zone and DS in each parent
+-- root DNSKEY (KSK 257 / ZSK 256) --
+256 <key>
+257 <key>
+-- com DS in root --
+53993 13 2 0291B1A7EC52C13981E1E980D15C6B192AA6E1674CB038E278687F41 527C370F
+-- example.com DS in com --
+365 13 2 1D9F6FA9DDC612FE2EB80EFE51C6C006DF937E639B82E0DCF793D3B7 CF9C717A

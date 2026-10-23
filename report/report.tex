@@ -254,4 +254,88 @@ so they are copied through verbatim. The interceptor log during a mixed run show
 answer marked \texttt{REWRITTEN} (\texttt{phase2/evidence/p2\_nontarget.txt}).
 
 
+
+% =====================================================================
+\section{Phase 3 --- DNSSEC Chain of Trust}
+
+\subsection{Design}
+Each zone is signed with \textbf{ECDSAP256SHA256 (algorithm 13)} by \texttt{sign/sign-all.sh},
+which works child-first so each child's DS can be published in its parent:
+\texttt{example.com} is signed and its DS placed in \texttt{com}; \texttt{com} is signed and its DS
+placed in the root; the root is signed last. Each authoritative server loads its \texttt{db.*.signed}
+file. The resolver enables \texttt{dnssec-validation yes} and installs \emph{only} the root KSK as a
+static trust anchor (\texttt{config/resolver/trust-anchor.conf}); its root hints are unchanged, and
+the attacker, diversion route, and \texttt{interceptor.c} are identical to Phase 2.
+
+Generated key material and signed zones are never committed --- they are reproduced by the signing
+script. The DS chain produced on one run was:
+\begin{lstlisting}
+com.         IN DS 53993 13 2 0291B1A7EC52...527C370F      (published in root)
+example.com. IN DS 365   13 2 1D9F6FA9DDC6...CF9C717A      (published in com)
+trust anchor: . static-key 257 3 13 "/a1Fphw+kLLcqF1+gJxLkPcP..."   (root KSK)
+\end{lstlisting}
+
+\subsection{Verification (3.2) --- a healthy signed hierarchy}
+With no interceptor in the path, the answer is authenticated end to end
+(\texttt{phase3/evidence/p3\_verify.txt}):
+\begin{lstlisting}
+$ dig +dnssec example.com
+;; flags: qr rd ra ad; ...                 <- the 'ad' (authenticated-data) flag is set
+example.com. 3600 IN A     172.16.1.20
+example.com. 3600 IN RRSIG A 13 2 3600 ... 19890 example.com. TVZej6fd...
+
+$ delv -a trust-anchor.conf @172.16.2.10 example.com
+; fully validated                          <- chain root KSK -> com DS -> example.com DS -> A
+\end{lstlisting}
+
+\subsection{Report answers}
+
+\textbf{(a) What the resolver does with the forged response; how it differs from Phase 2; what it
+checks.} The Phase 2 attack is re-run \emph{unchanged}. The interceptor still rewrites the
+\texttt{A} record to \texttt{172.16.1.30}, but the outcome is now the opposite of Phase 2
+(\texttt{phase3/evidence/p3\_attack.txt}):
+\begin{lstlisting}
+$ dig example.com
+;; ->>HEADER<<- status: SERVFAIL ; ANSWER: 0
+$ dig +short example.com
+(empty)                          # the client gets nothing; curl fetches no page
+[forge] ... example.com A REWRITTEN -> rogue-web   # the attacker is still forging
+\end{lstlisting}
+The resolver's own log says exactly what it checked and why it refused the answer:
+\begin{lstlisting}
+validating example.com/A: no valid signature found
+RRSIG failed to verify resolving 'example.com/A/IN': 172.16.3.30#53
+\end{lstlisting}
+This is the difference from Phase 2. There, the resolver accepted any syntactically valid reply
+that matched the query's ID/port/question. Here it additionally requires an \texttt{RRSIG} over the
+\texttt{A} RRset that verifies under a \texttt{DNSKEY} which is itself vouched for by a \texttt{DS}
+in the parent, up to the trust anchor. The attacker can change the \texttt{A} to \texttt{172.16.1.30}
+but \emph{cannot} produce a matching signature --- it holds no private key --- so the RRSIG that
+arrives still signs \texttt{172.16.1.20}. Signature verification over the tampered RRset fails and
+the resolver returns SERVFAIL rather than serve unauthenticated data. The capture
+(\texttt{p3\_attack\_decode.txt}) shows the forged \texttt{A=172.16.1.30} travelling with that stale
+RRSIG.
+
+\textbf{(b) Compared to Phase 1 on the wire: what can the attacker still read, and what does
+DNSSEC protect?} Nothing on the wire became secret. DNSSEC \emph{signs} records; it does not
+\emph{encrypt} them. The capture shows every query name, every answer (including the genuine
+\texttt{172.16.1.20} and the attacker's \texttt{172.16.1.30}), the referral chain, transaction IDs
+and ports --- all still in cleartext, exactly as in Phase 1. DNSSEC therefore provides
+\emph{origin authentication and integrity} of DNS data (a resolver can tell a tampered or spoofed
+record from a genuine one), but it provides \emph{no confidentiality}: an on-path observer still
+learns what was asked and what the true answer is, and can still see (though no longer successfully
+alter) the exchange. It also does not protect the last hop from resolver to a non-validating stub
+(Phase 6), nor hide which names exist (Phase 5).
+
+\textbf{(c) Signing-algorithm choice and private keys.} We chose \textbf{ECDSAP256SHA256
+(alg 13)}: its 256-bit keys and signatures are far smaller than equivalent-strength RSA (RSASHA256
+would need $\geq$2048-bit keys), which keeps responses small --- useful against UDP fragmentation
+and amplification --- while validation stays fast; it is also the modern recommendation for new
+deployments. The trade-off is that ECDSA verification is slightly more CPU-intensive per operation
+than RSA and demands a sound random source at signing time. \textbf{No private key belongs in the
+submitted repository}: the \texttt{K*.private} files and the signed zones are regenerated by
+\texttt{sign/sign-all.sh}, and only the (public) trust anchor is needed by the resolver, itself
+regenerated by the script. Committing a zone-signing private key would let anyone forge valid
+signatures for the zone, destroying the very guarantee DNSSEC provides.
+
 \end{document}
