@@ -1,0 +1,4 @@
+### Phase 7.2 VERIFY -- DoT last mile
+Strict client over DoT: example.com -> 172.16.1.20 (cert validated against private CA + hostname)
+Upstream DNSSEC still holds (resolver validates; genuine answer).
+edge-router capture during the lookup: TLS/853 only, 0 cleartext DNS packets (udp/53).

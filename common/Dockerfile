@@ -11,7 +11,7 @@ RUN echo "wireshark-common wireshark-common/install-setuid boolean false" | debc
  && apt-get update \
  && apt-get install -y --no-install-recommends \
       bind9 bind9-utils bind9-dnsutils \
-      iproute2 iputils-ping \
+      iproute2 iputils-ping iptables \
       tcpdump tshark \
       gcc g++ make libpcap-dev \
       curl openssl procps \

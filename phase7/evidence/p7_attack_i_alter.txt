@@ -1,0 +1,4 @@
+### (i) ALTER the answer in transit -- on-path DNS forger runs; DoT is intact
+STRICT     : 172.16.1.20   (real answer -- forger cannot alter encrypted DNS)
+PERMISSIVE : via DoT: 172.16.1.20   (DoT succeeds, no fallback)
+forger activity: 0 forges (no cleartext example.com to grab)

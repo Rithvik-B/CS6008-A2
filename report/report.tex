@@ -519,4 +519,75 @@ The forged \texttt{A=172.16.1.30} has no RRSIG that verifies (the genuine RRSIG 
 lesson: DNSSEC's guarantee reaches only as far as validation is actually performed; to be safe on an
 untrusted last mile the endpoint must validate locally (or the link must be authenticated --- Phase 7).
 
+
+% =====================================================================
+\section{Phase 7 --- Encrypting the Last Mile (DoT)}
+
+\subsection{Design}
+We deployed \textbf{DoT (DNS over TLS, TCP 853)} on the resolver, with a certificate issued by a
+private CA (\texttt{pki/make-ca.sh}) whose \emph{only} subject-alternative name is
+\texttt{DNS:resolver.cs6008.local} --- no IP SAN. Clients reach the resolver \emph{by name}
+(compose \texttt{extra\_hosts}) and validate the certificate against that hostname and the trusted CA
+(\texttt{dig +tls +tls-ca=/ca/ca.crt +tls-hostname=resolver.cs6008.local}). Two client behaviours are
+tested: a \textbf{strict} client (DoT only, validate, no fallback) and a \textbf{permissive} client
+(DoT, else cleartext fallback). We chose DoT over DoH (discussed below).
+
+\subsection{Verification (7.2)}
+The strict client resolves over DoT with the certificate validating cleanly
+(\texttt{example.com}$\to$\texttt{172.16.1.20}), upstream DNSSEC still holds, and a capture on
+\texttt{edge-router} during the lookup shows \textbf{TLS/853 traffic only --- zero cleartext DNS
+packets} (\texttt{phase7/evidence/p7\_verify.txt}).
+
+\subsection{Report answers}
+
+\textbf{(a) The six outcomes (attempt $\times$ client).}
+(\texttt{phase7/evidence/p7\_outcomes.txt})
+\begin{lstlisting}
+attack                        | strict (refuses cleartext)   | permissive (permits cleartext)
+------------------------------+------------------------------+------------------------------
+(i)  alter answer in transit  | REAL 172.16.1.20             | REAL 172.16.1.20
+(ii) rogue certificate        | FAILS CLOSED (cert rejected) | POISONED 172.16.1.30 (downgrade)
+(iii) block 853 (deny DoT)    | FAILS CLOSED (timeout)       | POISONED 172.16.1.30 (downgrade)
+\end{lstlisting}
+\emph{Why each:} In (i) the on-path forger --- the very program that poisoned the client in Phase 6
+--- is now blind: the query and answer travel inside TLS, so it can neither read the transaction to
+forge a matching reply nor substitute the answer; it breaks nothing, so DoT delivers the genuine
+record to \emph{both} clients. In (ii) the attacker runs a rogue DoT server presenting a certificate
+signed by an untrusted ``EVIL'' CA; the strict client checks the chain against its trusted CA, the
+rogue cert fails (\texttt{unable to get local issuer certificate}), and it refuses --- while the
+permissive client, on that TLS failure, falls back to cleartext and is served
+\texttt{172.16.1.30}. In (iii) the attacker drops TCP 853; the strict client has no transport and no
+fallback, so it fails closed (a denial of service, but \emph{not} a forgery), while the permissive
+client again downgrades to cleartext, where the Phase-6 forge lands. The pattern: the strict client
+is \emph{never} poisoned; attacks (ii) and (iii) only cost it availability. The permissive client is
+poisoned by anything that \emph{breaks} the tunnel, because its willingness to fall back converts a
+denial into a downgrade.
+
+\textbf{(b) DoT vs.\ DoH --- which, and the drawbacks.} We deployed \textbf{DoT}. Its advantage is
+operational clarity: it runs on its own well-known port (853), so it is easy to configure, capture,
+and reason about, and easy for an operator to see and manage. That same property is its drawback
+relative to \textbf{DoH}: because 853 is distinct and identifiable, DoT is trivial to \emph{block} ---
+exactly our attack (iii) --- and it stands out as ``DNS traffic'' to anyone watching the network.
+DoH hides DNS inside ordinary HTTPS on port 443, so it is far harder to single out and block and
+blends with web traffic (better censorship/blocking resistance and arguably more privacy from the
+network). DoH's drawbacks are the mirror image: it is heavier (full HTTP/2 framing over TLS),
+harder for a network operator to observe or govern, and it moves DNS resolution into applications
+(e.g.\ browsers) in ways that can bypass system policy. For a lab where clarity matters, DoT is the
+better teaching choice; for censorship resistance, DoH wins.
+
+\textbf{(c) What an encrypted, authenticated last mile still does \emph{not} protect.} Quite a lot.
+It secures the \emph{channel} between stub and resolver --- confidentiality and integrity of that
+one hop, plus authentication of the resolver's identity --- but: (1) it does nothing against a
+\emph{downgrade} if the client permits cleartext fallback (our permissive client); fail-closed
+behaviour is essential. (2) It does not protect a client that does not validate the certificate
+(trusting a rogue cert reopens everything). (3) It places full trust in the \emph{resolver itself}:
+a malicious or compromised resolver can lie over a perfectly encrypted, authenticated channel ---
+unless the data is independently DNSSEC-validated (Phase 6's Client B). (4) It is not
+confidentiality of \emph{metadata}: an observer still sees that the client is talking to this
+resolver, when, and how much. (5) It protects only the last mile --- the resolver$\leftrightarrow$
+authoritative path and everything upstream need their own protections (DNSSEC for integrity there).
+In short, encrypting the last mile closes the Phase-6 gap for a client that both validates and
+refuses to downgrade, but it is one layer among several, not a substitute for DNSSEC or for a
+trustworthy resolver.
+
 \end{document}

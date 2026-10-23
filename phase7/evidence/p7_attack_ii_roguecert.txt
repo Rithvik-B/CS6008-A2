@@ -1,0 +1,3 @@
+### (ii) IMPERSONATE with a rogue certificate -- rogue DoT server (EVIL CA) as the resolver
+STRICT     : ;; TLS peer certificate verification failed: unable to get local issuer certificate -> FAILS CLOSED
+PERMISSIVE : DoT cert fails -> CLEARTEXT fallback -> 172.16.1.30  (POISONED via downgrade)

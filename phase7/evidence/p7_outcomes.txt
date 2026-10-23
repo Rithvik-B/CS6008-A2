@@ -1,0 +1,13 @@
+### Phase 7.3 -- SIX outcomes (3 attacks x 2 clients)
+### Client R = STRICT (refuses cleartext, validates cert). Client P = PERMISSIVE (falls back to cleartext).
+
+attack                           | R: refuses cleartext         | P: permits cleartext        
+--------------------------------------------------------------------------------------------
+(i)  alter answer in transit     | REAL .20 (cannot alter)      | REAL .20 (DoT works)        
+(ii) rogue certificate           | FAILS CLOSED (cert rejected) | POISONED .30 (downgrade)    
+(iii) block 853 (deny DoT)       | FAILS CLOSED (timeout)       | POISONED .30 (downgrade)    
+
+The strict client is never poisoned (ii/iii are only denial-of-service). The permissive
+client is poisoned whenever an attack breaks DoT, because it then downgrades to cleartext
+where the Phase-6 forgery (or the rogue resolver) lands. Attack (i) breaks nothing, so no
+downgrade is triggered and both clients keep the genuine, encrypted answer.
