@@ -1,0 +1,4 @@
+### Phase 6.2 VERIFY -- last-mile relay transparent (both clients get the real answer)
+Client A dig : 172.16.1.20
+Client A curl: legitimate page
+Client B delv: ; fully validated

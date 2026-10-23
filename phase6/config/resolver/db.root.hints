@@ -1,0 +1,3 @@
+; Root hints for the recursive resolver — points only at our private root-ns.
+.           3600000 IN  NS  root-ns.
+root-ns.    3600000 IN  A   172.16.3.10

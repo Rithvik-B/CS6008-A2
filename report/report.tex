@@ -471,4 +471,52 @@ enumeration from a handful of online queries to an offline cracking effort; it d
 names secret. Only not signing (or using aggressive-NSEC/online-signing designs) changes that
 trade-off further.
 
+
+% =====================================================================
+\section{Phase 6 --- Last-Mile Response Forgery}
+
+\subsection{Design}
+Upstream (Phases 3--5) is untouched and still validating. The attacker is relocated to
+\texttt{172.16.1.100} on the client subnet, and \texttt{edge-router} diverts the resolver's
+client-bound replies (for \texttt{172.16.1.10} and \texttt{.11}) through it --- a route on the router
+only, no ARP spoofing. The interceptor binary is \emph{unchanged} from Phase 2/3; it is simply
+pointed at a client as its delivery target. Two clients are used: \textbf{Client A} (\texttt{client},
+an ordinary stub using \texttt{dig}/\texttt{curl}) and \textbf{Client B} (\texttt{client-b}, a
+locally-validating stub using \texttt{delv} with the root key as its own trust anchor).
+
+\subsection{Report answers}
+
+\textbf{(a) Outcome for each client.} With forging on (\texttt{phase6/evidence/p6\_attack.txt}):
+\begin{lstlisting}
+Client A (dig/curl):  example.com -> 172.16.1.30,  flags: qr rd ra ad,  curl -> DEFACED   (POISONED)
+Client B (delv):      ;; validating example.com/A: no valid signature found
+                      ;; resolution failed: RRSIG failed to verify                        (CAUGHT)
+\end{lstlisting}
+Client A lands on the rogue page; Client B rejects the answer.
+
+\textbf{(b) DNSSEC validates upstream --- why does it not stop this? Where validation happens vs.\
+where trust is placed.} DNSSEC validation happened, correctly, at the \emph{resolver}: the resolver
+fetched and verified the signatures for \texttt{example.com} on the resolver$\leftrightarrow$authoritative
+path, and its genuine reply to the client even carried \texttt{A=172.16.1.20} with the \texttt{ad}
+flag. But validation happening \emph{there} only protects \emph{that} hop. The last hop ---
+resolver$\to$client --- is plain, unauthenticated DNS, and that is where the attacker now sits. The
+distinction is between \emph{where validation happens} (at the resolver, upstream) and \emph{where
+trust is placed} (at the stub, which trusts its resolver's word). Client A places its trust in a link
+DNSSEC never covered, so the attacker who controls that link defeats it despite a perfectly valid
+chain one hop away.
+
+\textbf{(c) What the \texttt{ad} flag means, why the attacker can set it, and what Client B does
+differently.} The \texttt{ad} (authenticated-data) bit in a reply is the resolver's \emph{claim}
+``I validated this.'' It is a single bit in the cleartext DNS header, protected by nothing on the
+last mile. Our capture shows the forged reply carrying \texttt{A=172.16.1.30} \emph{with
+\texttt{ad}=1} (\texttt{phase6/evidence/p6\_adflag.txt}): the attacker rewrote the answer and left
+the bit set, so Client A, which believes the bit, is told a forged record was ``authenticated.'' An
+on-path attacker can set that bit to any value at will. Client B does something fundamentally
+different: it does not believe anyone's \texttt{ad} bit. Holding the root key as its own trust anchor,
+it fetches the \texttt{DNSKEY}/\texttt{RRSIG} records and \emph{re-verifies the signatures itself}.
+The forged \texttt{A=172.16.1.30} has no RRSIG that verifies (the genuine RRSIG signs
+\texttt{172.16.1.20}), so Client B reports ``RRSIG failed to verify'' and refuses the answer. The
+lesson: DNSSEC's guarantee reaches only as far as validation is actually performed; to be safe on an
+untrusted last mile the endpoint must validate locally (or the link must be authenticated --- Phase 7).
+
 \end{document}

@@ -1,0 +1,23 @@
+### Phase 6.3 ATTACK -- attacker on the client subnet forges the resolver->client reply
+
+=== CLIENT A: ordinary stub (dig/curl) -- trusts the resolver ===
+$ docker exec client dig example.com
+;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 55958
+;; flags: qr rd ra ad; QUERY: 1, ANSWER: 1, AUTHORITY: 0, ADDITIONAL: 1
+;; ANSWER SECTION:
+example.com.		3583	IN	A	172.16.1.30
+
+$ docker exec client curl -s http://example.com
+example.com has been DEFACED
+  -> POISONED: A=172.16.1.30, and the reply even carries the ad (authenticated-data) flag.
+
+=== CLIENT B: validating stub (delv with the root key as trust anchor) ===
+$ docker exec client-b delv -a /anchor/trust-anchor.conf @172.16.2.10 example.com
+;; validating example.com/A: no valid signature found
+;; RRSIG failed to verify resolving 'example.com/A/IN': 172.16.2.10#53
+;; resolution failed: RRSIG failed to verify
+  -> CAUGHT: delv validates locally and the forged A has no valid RRSIG.
+
+### The forged last-mile reply on the wire (ad flag set, answer tampered):
+  genuine in : ip.src=resolver  ad=1  A=172.16.1.20
+  forged  out: ip.src=resolver  ad=1  A=172.16.1.30   <-- attacker set ad at will
