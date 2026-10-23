@@ -1,0 +1,17 @@
+### Phase 2.2 VERIFY -- interceptor in RELAY mode (forging disabled), diversion ON
+### The attacker is on-path and relays every reply; resolution is unaffected.
+
+$ docker exec attacker head -2 /tmp/relay.log
+interceptor up: iface=eth0 mode=relay resolver=172.16.2.10(02:ec:87:d5:68:8e) forged=172.16.1.30
+filter: udp and src port 53 and dst host 172.16.2.10 and not ether src 02:96:fd:d8:c7:79
+
+$ docker exec client dig +short example.com
+172.16.1.20
+$ docker exec client curl -s http://example.com | grep -i legitimate
+  <p>This is the <strong>legitimate</strong> site, served by
+
+### relayed packets (all forwarded unchanged, forged=0):
+[relay] relayed 101-byte DNS reply -> resolver (seen=2 forged=0)
+[relay] relayed 101-byte DNS reply -> resolver (seen=3 forged=0)
+[relay] relayed 117-byte DNS reply -> resolver (seen=4 forged=0)
+[relay] relayed 113-byte DNS reply -> resolver (seen=5 forged=0)

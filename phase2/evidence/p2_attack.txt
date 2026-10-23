@@ -1,0 +1,7 @@
+### Phase 2.3 ATTACK -- forging enabled
+$ docker exec client dig +short example.com    # TARGET
+172.16.1.30
+$ docker exec client dig +short www.example.com # non-target
+172.16.1.20
+$ docker exec client curl -s http://example.com | grep DEFACED
+example.com has been DEFACED

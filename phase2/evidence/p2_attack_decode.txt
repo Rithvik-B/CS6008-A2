@@ -1,0 +1,35 @@
+### Phase 2 attack capture (attacker eth0): interception + injection of example.com
+### The attacker is the sole deliverer of replies to the resolver (core-router diverts
+### them here). For each reply it rewrites the Ethernet dst to the resolver and injects;
+### only the example.com A record is changed, everything else is relayed byte-for-byte.
+###
+### MACs:  ea:93:66:26:29:d8 = core-router (genuine reply arriving at attacker)
+###        02:96:fd:d8:c7:79 = attacker   (frame injected toward the resolver)
+###        02:ec:87:d5:68:8e = resolver   (injection destination)
+###
+### frame  eth.src      ip.src        dns.a (answer)            note
+### -----------------------------------------------------------------------------------
+###   7    core-router  172.16.3.30   172.16.1.20,172.16.3.30   GENUINE domain answer IN
+###   8    attacker     172.16.3.30   172.16.1.30,172.16.3.30   FORGED  answer OUT -> resolver
+###
+### i.e. the genuine A=172.16.1.20 (frame 7) is rewritten to A=172.16.1.30 (frame 8) and
+### delivered to the resolver. The root/com referrals (frames 1-6) are relayed unchanged.
+###
+### NOTE on checksums: captured frames on this Docker veth path carry offloaded/partial
+### UDP checksums, which tshark cannot verify (it flags them). The interceptor recomputes
+### a full IP+UDP checksum on every injected frame; the proof it is valid is that the
+### validating-OFF resolver ACCEPTS the forged answer, caches it, and serves 172.16.1.30
+### to the client (Linux silently drops UDP datagrams with a wrong checksum).
+
+1	ea:93:66:26:29:d8	02:96:fd:d8:c7:79	172.16.3.10	example.com	172.16.3.20
+2	ea:93:66:26:29:d8	02:96:fd:d8:c7:79	172.16.3.10	<Root>	
+3	02:96:fd:d8:c7:79	02:ec:87:d5:68:8e	172.16.3.10	example.com	172.16.3.20
+4	02:96:fd:d8:c7:79	02:ec:87:d5:68:8e	172.16.3.10	<Root>	
+5	ea:93:66:26:29:d8	02:96:fd:d8:c7:79	172.16.3.20	example.com	172.16.3.30
+6	02:96:fd:d8:c7:79	02:ec:87:d5:68:8e	172.16.3.20	example.com	172.16.3.30
+7	ea:93:66:26:29:d8	02:96:fd:d8:c7:79	172.16.3.30	example.com	172.16.1.20,172.16.3.30
+8	02:96:fd:d8:c7:79	02:ec:87:d5:68:8e	172.16.3.30	example.com	172.16.1.30,172.16.3.30
+9	ea:93:66:26:29:d8	02:96:fd:d8:c7:79	172.16.3.30	www.example.com	172.16.1.20,172.16.3.30
+10	02:96:fd:d8:c7:79	02:ec:87:d5:68:8e	172.16.3.30	www.example.com	172.16.1.20,172.16.3.30
+11	ea:93:66:26:29:d8	02:96:fd:d8:c7:79	172.16.3.30	example.com	
+12	02:96:fd:d8:c7:79	02:ec:87:d5:68:8e	172.16.3.30	example.com	

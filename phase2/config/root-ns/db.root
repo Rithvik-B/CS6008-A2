@@ -1,0 +1,15 @@
+; Root zone (.) — authoritative on root-ns (172.16.3.10)
+; Private lab root: delegates com. to the TLD server. Not the real Internet root.
+$TTL 3600
+@               IN  SOA root-ns. admin.root-ns. (
+                        2026102301 ; serial
+                        3600       ; refresh
+                        600        ; retry
+                        604800     ; expire
+                        3600 )     ; minimum
+; --- root's own nameserver ---
+@               IN  NS  root-ns.
+root-ns.        IN  A   172.16.3.10
+; --- delegation of com. to the TLD nameserver (in-bailiwick glue) ---
+com.            IN  NS  ns.com.
+ns.com.         IN  A   172.16.3.20

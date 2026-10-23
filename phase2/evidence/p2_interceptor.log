@@ -1,0 +1,8 @@
+interceptor up: iface=eth0 mode=forge resolver=172.16.2.10(02:ec:87:d5:68:8e) forged=172.16.1.30
+filter: udp and src port 53 and dst host 172.16.2.10 and not ether src 02:96:fd:d8:c7:79
+[forge] relayed 101-byte DNS reply -> resolver (seen=1 forged=0)
+[forge] relayed 76-byte DNS reply -> resolver (seen=2 forged=0)
+[forge] relayed 101-byte DNS reply -> resolver (seen=3 forged=0)
+[forge] relayed 117-byte DNS reply -> resolver  *** example.com A REWRITTEN -> rogue-web *** (seen=4 forged=1)
+[forge] relayed 121-byte DNS reply -> resolver (seen=5 forged=1)
+[forge] relayed 113-byte DNS reply -> resolver (seen=6 forged=1)

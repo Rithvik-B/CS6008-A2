@@ -1,0 +1,12 @@
+### Phase 2 resolver cache after the attack (rndc dumpdb -cache)
+### example.com poisoned to rogue-web (.30); www.example.com untouched (.20)
+
+
+### context around the poisoned example.com A record:
+example.com.		3589	NS	ns.example.com.
+; answer
+			3590	\-AAAA	;-$NXRRSET
+; example.com. SOA ns.example.com. admin.example.com. 2026102301 3600 600 604800 3600
+; authanswer
+			3589	A	172.16.1.30
+; glue

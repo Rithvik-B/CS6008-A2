@@ -161,4 +161,97 @@ source port, and the question, so it can craft a response that the resolver will
 genuine and cache. It can do this for one chosen name while relaying everything else untouched.
 We exploit precisely this in Phase 2.
 
+
+% =====================================================================
+\section{Phase 2 --- On-Path Response Forgery}
+
+\subsection{Design}
+The adversary is placed on the resolver subnet at \texttt{172.16.2.100} and the client's rogue
+server \texttt{rogue-web} at \texttt{172.16.1.30}. The resolver's inbound replies are diverted
+through the attacker by a single route on \emph{core-router} only
+(\texttt{diversion/divert-on.sh}):
+\begin{lstlisting}
+ip route replace 172.16.2.10/32 via 172.16.2.100   # on core-router
+\end{lstlisting}
+Every reply bound for the resolver is therefore handed to the attacker, which is now the sole
+deliverer of answers to the resolver (there is no packet race --- the genuine reply physically
+reaches us, not the resolver).
+
+The interceptor (\texttt{attack/interceptor.c}, C + libpcap) captures each diverted reply, and in
+\texttt{forge} mode rewrites \emph{only} the \texttt{A} record whose owner name is
+\texttt{example.com} in the answer section to \texttt{172.16.1.30}; it then recomputes the IP and
+UDP checksums, rewrites the Ethernet destination to the resolver's MAC, and \texttt{pcap\_inject}s
+the frame onward. All other traffic --- the root and com referrals, glue, and
+\texttt{www.example.com} --- is relayed byte-for-byte.
+
+Two design points were essential. First, every non-router node is pinned to
+\texttt{net.ipv4.ip\_forward=0}: Docker containers otherwise inherit \texttt{ip\_forward=1} from
+the host VM, and the attacker's own kernel would forward the genuine reply to the resolver before
+our forged one, defeating the attack and violating the ``only routers forward'' policy. Second,
+the interceptor must recompute checksums on \emph{every} injected frame, because frames captured
+on the Docker veth path carry offloaded (incomplete) UDP checksums that are invalid once injected
+as raw bytes.
+
+\subsection{Verification (2.2) --- transparent relay}
+With forging disabled the interceptor relays every reply unchanged, so resolution is unaffected
+(\texttt{phase2/evidence/p2\_verify\_relay.txt}):
+\begin{lstlisting}
+$ docker exec client dig +short example.com
+172.16.1.20
+$ docker exec client curl -s http://example.com | grep -i legitimate
+   <p>This is the legitimate site, served by webserver at 172.16.1.20.</p>
+[relay] relayed 117-byte DNS reply -> resolver (seen=4 forged=0)
+\end{lstlisting}
+This proves the attacker is genuinely on-path and that the diversion itself does not break DNS.
+
+\subsection{Report answers}
+
+\textbf{(a) What the resolver cached and what the fetch returned.} With forging enabled, the
+client resolves the poisoned name and fetches the rogue page, while the non-target name is
+unaffected (\texttt{phase2/evidence/p2\_attack.txt}, \texttt{p2\_nontarget.txt}):
+\begin{lstlisting}
+$ docker exec client dig +short example.com         # TARGET
+172.16.1.30
+$ docker exec client dig +short www.example.com      # non-target
+172.16.1.20
+$ docker exec client curl -s http://example.com | grep DEFACED
+  <h1> example.com has been DEFACED </h1>
+\end{lstlisting}
+The resolver's cache dump confirms the poisoned record was accepted as an answer
+(\texttt{phase2/evidence/p2\_cache.txt}):
+\begin{lstlisting}
+example.com.    3589  NS  ns.example.com.
+; authanswer
+                3589  A   172.16.1.30
+www.example.com. 3589 A   172.16.1.20
+\end{lstlisting}
+The annotated capture on the attacker's NIC shows the interception and injection of the single
+answer (\texttt{phase2/evidence/p2\_attack\_decode.txt}):
+\begin{lstlisting}
+frame  eth.src      ip.src        dns.a                      note
+  7    core-router  172.16.3.30   172.16.1.20,172.16.3.30    GENUINE domain answer IN
+  8    attacker     172.16.3.30   172.16.1.30,172.16.3.30    FORGED answer OUT -> resolver
+\end{lstlisting}
+The genuine \texttt{A=172.16.1.20} (frame 7) is rewritten to \texttt{172.16.1.30} (frame 8) and
+delivered to the resolver; the root/com referrals that precede it are relayed unchanged.
+
+\textbf{(b) Why the attack succeeds; the value of the on-path position.} Plain DNS answers are
+\emph{unauthenticated}: the resolver accepts a reply solely because it matches the outstanding
+query's transaction ID, UDP source port, and question --- none of which prove the reply came from
+the genuine nameserver. An \emph{off-path} attacker who cannot see the query must \emph{guess}
+those 16-bit fields (and win a race against the real reply), which is slow and unreliable. Our
+\emph{on-path} position removes all of that: because we see (indeed, carry) the genuine reply, we
+know the ID, port, and question exactly, and we simply edit the real answer in flight. There is no
+guessing and no race --- the resolver's only copy of the reply is the one we hand it, so acceptance
+is guaranteed.
+
+\textbf{(c) How non-target names stay untouched.} The rewrite is gated on an exact owner-name
+match: the interceptor decompresses each answer RR's owner name and rewrites the RDATA only when
+it equals \texttt{example.com} and the type is \texttt{A}. Referrals (answer section empty), glue
+records (owners \texttt{ns.com}/\texttt{ns.example.com}), and \texttt{www.example.com} never match,
+so they are copied through verbatim. The interceptor log during a mixed run shows every
+\texttt{www.example.com} reply relayed with \texttt{forged=0} and only the \texttt{example.com}
+answer marked \texttt{REWRITTEN} (\texttt{phase2/evidence/p2\_nontarget.txt}).
+
+
 \end{document}
